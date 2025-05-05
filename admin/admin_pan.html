@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Articles</title>
+    <script type="module">
+        if (localStorage.getItem('authenticated') !== 'true') {
+            window.location.href = 'login.html';
+        }
+
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js";
+        import { getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-firestore.js";
+        import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-storage.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAvzVROIUnoConplwk-8tpyz43Srg2qDso",
+            authDomain: "mesal-web-site.firebaseapp.com",
+            projectId: "mesal-web-site",
+            storageBucket: "mesal-web-site.appspot.com",
+            messagingSenderId: "648438491500",
+            appId: "1:648438491500:web:4d6326b259643259832b49"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const storage = getStorage(app);
+
+        async function displayArticles() {
+            const articlesContainer = document.getElementById('articles');
+            articlesContainer.innerHTML = '';
+
+            const querySnapshot = await getDocs(collection(db, "articles"));
+            querySnapshot.forEach((doc) => {
+                const article = doc.data();
+                const articleDiv = document.createElement('div');
+                articleDiv.className = 'article';
+                articleDiv.innerHTML = `
+                    <div class="article-content">
+                        <h2>(RU) ${article.titleRu}</h2>
+                        <h2>(UZ) ${article.titleUz}</h2>
+                        <h2>(EN) ${article.titleEn}</h2>
+                        <p>(RU) ${article.descriptionRu}</p>
+                        <p>(UZ) ${article.descriptionUz}</p>
+                        <p>(EN) ${article.descriptionEn}</p>
+                        <p><strong>Publication Date:</strong> ${article.publishDate}</p>
+                    </div>
+                    <img src="${article.imageUrl}" alt="${article.title}" class="article-img"><br>
+                    <button class="edit-button" onclick="editArticle('${doc.id}', '${article.titleRu}','${article.titleUz}','${article.titleEn}', '${article.descriptionRu}','${article.descriptionUz}','${article.descriptionEn}', '${article.imageUrl}', '${article.publishDate}')">Edit</button>
+                    <button class="delete-button" onclick="deleteArticle('${doc.id}')">Delete</button>
+                `;
+                articlesContainer.appendChild(articleDiv);
+            });
+
+            document.querySelectorAll('.article-img').forEach(img => {
+                img.addEventListener('click', () => {
+                    showImageFullscreen(img.src);
+                });
+            });
+        }
+
+        function showLoading() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('overlay').style.display = 'block';
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('overlay').style.display = 'none';
+        }
+
+        document.getElementById('articleForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const titleRu = document.getElementById('titleRu').value;
+            const titleUz = document.getElementById('titleUz').value;
+            const titleEn = document.getElementById('titleEn').value;
+            const descriptionRu = document.getElementById('descriptionRu').value;
+            const descriptionUz = document.getElementById('descriptionUz').value;
+            const descriptionEn = document.getElementById('descriptionEn').value;
+            const imageFile = document.getElementById('image').files[0];
+            const publishDate = document.getElementById('publishDate').value;
+
+            if (!imageFile || !publishDate) return;
+
+            showLoading();
+
+            const storageRef = ref(storage, 'images/' + imageFile.name);
+            const uploadTask = uploadBytesResumable(storageRef, imageFile);
+
+            uploadTask.on('state_changed',
+                (snapshot) => {
+                },
+                (error) => {
+                    console.error('Error uploading image:', error);
+                    hideLoading();
+                },
+                () => {
+                    getDownloadURL(uploadTask.snapshot.ref).then(async (downloadURL) => {
+                        await addDoc(collection(db, "articles"), {
+                            titleRu: titleRu,
+                            titleUz: titleUz,
+                            titleEn: titleEn,
+                            descriptionRu: descriptionRu,
+                            descriptionUz: descriptionUz,
+                            descriptionEn: descriptionEn,
+                            imageUrl: downloadURL,
+                            publishDate: publishDate
+                        });
+                        document.getElementById('articleForm').reset();
+                        document.getElementById('saveButton').style.display = 'inline-block';
+                        const updateButton = document.querySelector('.update-button');
+                        if (updateButton) updateButton.remove();
+                        const cancelButton = document.querySelector('.cancel-button');
+                        if (cancelButton) cancelButton.remove();
+                        hideLoading();
+                        displayArticles();
+                    }).catch((error) => {
+                        console.error('Error adding document:', error);
+                        hideLoading();
+                    });
+                }
+            );
+        });
+
+        window.editArticle = async function (id, titleRu, titleUz, titleEn, descriptionRu, descriptionUz, descriptionEn, imageUrl, publishDate) {
+            document.getElementById('titleRu').value = titleRu;
+            document.getElementById('titleUz').value = titleUz;
+            document.getElementById('titleEn').value = titleEn;
+            document.getElementById('descriptionRu').value = descriptionRu;
+            document.getElementById('descriptionUz').value = descriptionUz;
+            document.getElementById('descriptionEn').value = descriptionEn;
+            document.getElementById('image').value = '';
+            document.getElementById('publishDate').value = publishDate;
+
+            document.getElementById('saveButton').style.display = 'none';
+
+            const existingUpdateButton = document.querySelector('.update-button');
+            if (existingUpdateButton) {
+                existingUpdateButton.remove();
+            }
+
+            const updateButton = document.createElement('button');
+            updateButton.innerText = 'Update Article';
+            updateButton.className = 'update-button';
+            updateButton.onclick = async function (e) {
+                e.preventDefault();
+                const newTitleRu = document.getElementById('titleRu').value;
+                const newTitleUz = document.getElementById('titleUz').value;
+                const newTitleEn = document.getElementById('titleEn').value;
+                const newDescriptionRu = document.getElementById('descriptionRu').value;
+                const newDescriptionUz = document.getElementById('descriptionUz').value;
+                const newDescriptionEn = document.getElementById('descriptionEn').value;
+                const newImageFile = document.getElementById('image').files[0];
+                const newPublishDate = document.getElementById('publishDate').value;
+
+                if (!newPublishDate) return;
+
+                showLoading();
+
+                if (newImageFile) {
+                    const newStorageRef = ref(storage, 'images/' + newImageFile.name);
+                    const newUploadTask = uploadBytesResumable(newStorageRef, newImageFile);
+
+                    newUploadTask.on('state_changed',
+                        (snapshot) => {
+                        },
+                        (error) => {
+                            console.error('Error uploading new image:', error);
+                            hideLoading();
+                        },
+                        async () => {
+                            const newDownloadURL = await getDownloadURL(newUploadTask.snapshot.ref);
+                            const articleDocRef = doc(db, "articles", id);
+                            await updateDoc(articleDocRef, {
+                                titleRu: newTitleRu,
+                                titleUz: newTitleUz,
+                                titleEn: newTitleEn,
+                                descriptionRu: newDescriptionRu,
+                                descriptionUz: newDescriptionUz,
+                                descriptionEn: newDescriptionEn,
+                                imageUrl: newDownloadURL,
+                                publishDate: newPublishDate
+                            });
+                            document.getElementById('articleForm').reset();
+                            updateButton.remove();
+                            const cancelButton = document.querySelector('.cancel-button');
+                            if (cancelButton) cancelButton.remove();
+                            document.getElementById('saveButton').style.display = 'inline-block';
+                            hideLoading();
+                            displayArticles();
+                        }
+                    );
+                } else {
+                    const articleDocRef = doc(db, "articles", id);
+                    await updateDoc(articleDocRef, {
+                        titleRu: newTitleRu,
+                        titleUz: newTitleUz,
+                        titleEn: newTitleEn,
+                        descriptionRu: newDescriptionRu,
+                        descriptionUz: newDescriptionUz,
+                        descriptionEn: newDescriptionEn,
+                        publishDate: newPublishDate
+                    });
+                    document.getElementById('articleForm').reset();
+                    updateButton.remove();
+                    const cancelButton = document.querySelector('.cancel-button');
+                    if (cancelButton) cancelButton.remove();
+                    document.getElementById('saveButton').style.display = 'inline-block';
+                    hideLoading();
+                    displayArticles();
+                }
+            };
+
+            document.getElementById('articleForm').appendChild(updateButton);
+
+            const existingCancelButton = document.querySelector('.cancel-button');
+            if (existingCancelButton) {
+                existingCancelButton.remove();
+            }
+
+            const cancelButton = document.createElement('button');
+            cancelButton.innerText = 'Cancel Editing';
+            cancelButton.className = 'cancel-button';
+            cancelButton.onclick = function (e) {
+                e.preventDefault();
+                document.getElementById('articleForm').reset();
+                updateButton.remove();
+                cancelButton.remove();
+                document.getElementById('saveButton').style.display = 'inline-block';
+            };
+
+            document.getElementById('articleForm').appendChild(cancelButton);
+        };
+
+        window.deleteArticle = async function (id) {
+            showLoading();
+            const articleDocRef = doc(db, "articles", id);
+            await deleteDoc(articleDocRef);
+            hideLoading();
+            displayArticles();
+        };
+
+        function showImageFullscreen(src) {
+            const fullscreenContainer = document.createElement('div');
+            fullscreenContainer.className = 'fullscreen-container';
+            fullscreenContainer.innerHTML = `
+                <img src="${src}" class="fullscreen-img">
+                <button class="close-button">Close</button>
+            `;
+            document.body.appendChild(fullscreenContainer);
+
+            document.querySelector('.close-button').addEventListener('click', closeFullscreen);
+        }
+
+        function closeFullscreen() {
+            const fullscreenContainer = document.querySelector('.fullscreen-container');
+            if (fullscreenContainer) {
+                fullscreenContainer.remove();
+            }
+        }
+
+        displayArticles();
+    </script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            margin: 0;
+        }
+
+        h1 {
+            color: #007BFF;
+        }
+
+        form {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            width: 100%;
+            max-width: 600px;
+            box-sizing: border-box;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        input[type="text"],
+        textarea,
+        input[type="file"],
+        input[type="date"] {
+            width: calc(100% - 16px);
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        .update-button {
+            background-color: #28a745;
+            margin-top: 10px;
+        }
+
+        .update-button:hover {
+            background-color: #218838;
+        }
+
+        .cancel-button {
+            background-color: #6c757d;
+            margin-top: 10px;
+            margin-left: 10px;
+        }
+
+        .cancel-button:hover {
+            background-color: #5a6268;
+        }
+
+        .edit-button {
+            background-color: #ffc107;
+            margin-bottom: 10px;
+        }
+
+        .edit-button:hover {
+            background-color: #e0a800;
+        }
+
+        .delete-button {
+            background-color: #dc3545;
+        }
+
+        .delete-button:hover {
+            background-color: #c82333;
+        }
+
+        .articles-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
+            width: 100%;
+            max-width: 1920px;
+            overflow-x: auto;
+            padding-bottom: 20px;
+        }
+
+        .articles-container h2{
+            font-size: 21px;
+        }
+
+        .article {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            flex: 1 1 calc(33.333% - 40px);
+            box-sizing: border-box;
+            min-width: 300px;
+            max-width: 600px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .article-content {
+            flex: 1;
+            min-height: 150px;
+        }
+
+        .article img {
+            width: 100%;
+            height: 300px;
+            object-fit: cover;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        .overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+
+        @media (max-width: 1200px) {
+            .article {
+                flex: 1 1 calc(50% - 40px);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .article {
+                flex: 1 1 100%;
+            }
+        }
+
+        .fullscreen-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .fullscreen-img {
+            max-width: 90%;
+            max-height: 90%;
+            border-radius: 8px;
+        }
+
+        .close-button {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .close-button:hover {
+            background-color: #c82333;
+        }
+
+        .loading {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: 8px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 8px solid #007BFF;
+            width: 60px;
+            height: 60px;
+            animation: spin 2s linear infinite;
+            z-index: 1001;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .product-button {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .product-button:hover {
+            background-color: #218838;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Manage Articles</h1>
+
+    <form id="articleForm">
+        <label for="titleRu">Title (RU):</label>
+        <input type="text" id="titleRu" name="titleRu" required>
+
+        <label for="titleEn">Title (EN):</label>
+        <input type="text" id="titleEn" name="titleEn" required>
+
+        <label for="titleUz">Title (UZ):</label>
+        <input type="text" id="titleUz" name="titleUz" required>
+
+        <label for="descriptionRu">Description (RU):</label>
+        <textarea id="descriptionRu" name="descriptionRu" required></textarea>
+
+        <label for="descriptionEn">Description (EN):</label>
+        <textarea id="descriptionEn" name="descriptionEn" required></textarea>
+
+        <label for="descriptionUz">Description (UZ):</label>
+        <textarea id="descriptionUz" name="descriptionUz" required></textarea>
+
+
+        <label for="publishDate">Publication Date:</label>
+        <input type="date" id="publishDate" name="publishDate" required>
+
+        <label for="image">Image:</label>
+        <input type="file" id="image" name="image" required>
+
+        <button type="submit" id="saveButton">Save Article</button>
+    </form>
+
+    <div class="overlay" id="overlay"></div>
+    <div class="loading" id="loading"></div>
+
+    <div class="articles-container" id="articles"></div>
+
+    <button class="product-button" onclick="window.location.href='admin_products.html'">Manage Products</button>
+</body>
+
+</html>
